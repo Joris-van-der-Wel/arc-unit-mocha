@@ -67,16 +67,7 @@ final class MochaEngine extends ArcanistUnitTestEngine {
             }
         }
 
-        $future = $this->buildTestFuture($xunit_tmp);
-        $future->setCWD($this->projectRoot);
-        try {
-            list($stdout, $stderr) = $future->resolvex();
-        } catch (CommandException $exc) {
-            if ($exc->getError() > 1) {
-                // mocha returns 1 if tests are failing
-                throw $exc;
-            }
-        }
+        $this->runTest($xunit_tmp);
 
         // Parse and return the xunit output
         $this->parser = new ArcanistXUnitTestResultParser();
@@ -85,7 +76,7 @@ final class MochaEngine extends ArcanistUnitTestEngine {
         return $results;
     }
 
-    protected function buildTestFuture($xunit_tmp) {
+    protected function runTest($xunit_tmp) {
         // Create test include options list
         $include_opts = array();
         if ($this->testIncludes != null) {
@@ -96,7 +87,7 @@ final class MochaEngine extends ArcanistUnitTestEngine {
         $include_opts = implode(' ', $include_opts);
 
         if ($this->getEnableCoverage()  !== false) {
-            return new ExecFuture(
+            $command = csprintf(
                 '%C --all --reporter clover --report-dir %s ' .
                 '%s -R xunit --reporter-options output=%s %C',
                 $this->nycBin,
@@ -107,12 +98,24 @@ final class MochaEngine extends ArcanistUnitTestEngine {
             );
         }
         else {
-            return new ExecFuture(
+            $command = csprintf(
                 '%s -R xunit --reporter-options output=%s %C',
                 $this->mochaBin,
                 $xunit_tmp,
                 $include_opts
             );
+        }
+        $cwd = getcwd();
+        try {
+            chdir($this->projectRoot);
+            passthru($command, $exit_status);
+        }
+        finally {
+            chdir($cwd);
+        }
+        if ($exit_status > 1) {
+            // mocha returns 1 if tests are failing
+            throw new CommandException('Exit status of ' . $exit_status, $command, null, '', '');
         }
     }
 
