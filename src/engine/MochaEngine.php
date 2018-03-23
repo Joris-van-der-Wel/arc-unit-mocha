@@ -6,10 +6,8 @@ final class MochaEngine extends ArcanistUnitTestEngine {
     private $parser;
 
     private $mochaBin;
-    private $_mochaBin;
-    private $istanbulBin;
+    private $nycBin;
     private $coverReportDir;
-    private $coverExcludes;
     private $testIncludes;
 
     /**
@@ -28,28 +26,20 @@ final class MochaEngine extends ArcanistUnitTestEngine {
             'unit.mocha.bin.mocha',
             './node_modules/mocha/bin/mocha');
 
-        $this->_mochaBin = $config->getConfigFromAnySource(
-            'unit.mocha.bin._mocha',
-            './node_modules/mocha/bin/_mocha');
-
-        $this->istanbulBin = $config->getConfigFromAnySource(
-            'unit.mocha.bin.istanbul',
-            './node_modules/istanbul/lib/cli.js');
+        $this->nycBin = $config->getConfigFromAnySource(
+            'unit.mocha.bin.nyc',
+            './node_modules/nyc/bin/nyc.js');
 
         $this->coverReportDir = $config->getConfigFromAnySource(
             'unit.mocha.coverage.reportdir',
             './coverage');
-
-        $this->coverExcludes = $config->getConfigFromAnySource(
-            'unit.mocha.coverage.exclude');
 
         $this->testIncludes = $config->getConfigFromAnySource(
             'unit.mocha.test.include',
             '');
 
         // Make sure required binaries are available
-        $binaries = array($this->mochaBin, $this->_mochaBin,
-                          $this->istanbulBin);
+        $binaries = array($this->mochaBin, $this->nycBin);
 
         foreach ($binaries as $binary) {
             if (!Filesystem::binaryExists($binary)) {
@@ -68,10 +58,17 @@ final class MochaEngine extends ArcanistUnitTestEngine {
         $xunit_tmp = new TempFile();
         $cover_xml_path = $this->coverReportDir . '/clover.xml';
 
-        // Build and run the unit test command
+        if ($this->getEnableCoverage() !== false) {
+            // Remove coverage report if it already exists
+            if (file_exists($cover_xml_path)) {
+                if (!unlink($cover_xml_path)) {
+                    throw new Exception("Couldn't delete old coverage report '" . $cover_xml_path . "'");
+                }
+            }
+        }
+
         $future = $this->buildTestFuture($xunit_tmp);
         $future->setCWD($this->projectRoot);
-
         try {
             list($stdout, $stderr) = $future->resolvex();
         } catch (CommandException $exc) {
@@ -79,20 +76,6 @@ final class MochaEngine extends ArcanistUnitTestEngine {
                 // mocha returns 1 if tests are failing
                 throw $exc;
             }
-        }
-
-        if ($this->getEnableCoverage() !== false) {
-            // Remove coverage report if it already exists
-            if (file_exists($cover_xml_path)) {
-                if(!unlink($cover_xml_path)) {
-                    throw new Exception("Couldn't delete old coverage report '".$cover_xml_path."'");
-                }
-            }
-
-            // Build and run the coverage command
-            $future = $this->buildCoverFuture();
-            $future->setCWD($this->projectRoot);
-            $future->resolvex();
         }
 
         // Parse and return the xunit output
@@ -104,47 +87,33 @@ final class MochaEngine extends ArcanistUnitTestEngine {
 
     protected function buildTestFuture($xunit_tmp) {
         // Create test include options list
-        $include_opts = '';
+        $include_opts = array();
         if ($this->testIncludes != null) {
             foreach ($this->testIncludes as $include_glob) {
-                $include_opts .= ' ' . escapeshellarg($include_glob);
+                $include_opts[] = escapeshellarg($include_glob);
             }
         }
-        return new ExecFuture('%C -R xunit --reporter-options output=%s %C',
-                              $this->mochaBin,
-                              $xunit_tmp,
-                              $include_opts);
-    }
+        $include_opts = implode(' ', $include_opts);
 
-    protected function buildCoverFuture() {
-        // Create exclude option list
-        $exclude_opts = '';
-        if ($this->coverExcludes != null) {
-            foreach ($this->coverExcludes as $exclude_glob) {
-                $exclude_opts .= ' -x ' . escapeshellarg($exclude_glob);
-            }
+        if ($this->getEnableCoverage()  !== false) {
+            return new ExecFuture(
+                '%C --all --reporter clover --report-dir %s ' .
+                '%s -R xunit --reporter-options output=%s %C',
+                $this->nycBin,
+                $this->coverReportDir,
+                $this->mochaBin,
+                $xunit_tmp,
+                $include_opts
+            );
         }
-
-        // Create test include options list
-        $include_opts = '';
-        if ($this->testIncludes != null) {
-            foreach ($this->testIncludes as $include_glob) {
-                $include_opts .= ' ' . escapeshellarg($include_glob);
-            }
+        else {
+            return new ExecFuture(
+                '%s -R xunit --reporter-options output=%s %C',
+                $this->mochaBin,
+                $xunit_tmp,
+                $include_opts
+            );
         }
-        
-        return new ExecFuture('%C cover %s ' .
-                              '--report clover ' .
-                              '--dir %s ' .
-                              '--default-excludes ' .
-                              '--include-all-sources ' .
-                              '%C ' .
-                              '%C ',
-                              $this->istanbulBin,
-                              $this->_mochaBin,
-                              $this->coverReportDir,
-                              $exclude_opts,
-                              $include_opts);
     }
 
     protected function parseTestResults($xunit_tmp, $cover_xml_path) {
