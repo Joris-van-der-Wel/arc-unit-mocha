@@ -36,7 +36,7 @@ final class MochaEngine extends ArcanistUnitTestEngine {
 
         $this->testIncludes = $config->getConfigFromAnySource(
             'unit.mocha.test.include',
-            '');
+            array('test/**/*.test.js'));
 
         // Make sure required binaries are available
         $binaries = array($this->mochaBin, $this->nycBin);
