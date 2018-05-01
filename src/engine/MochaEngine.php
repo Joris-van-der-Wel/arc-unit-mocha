@@ -109,13 +109,11 @@ final class MochaEngine extends ArcanistUnitTestEngine {
         try {
             chdir($this->projectRoot);
             passthru($command, $exit_status);
+            // note: mocha uses the number of failures as its exit status, so we can not use the exit status to
+            // differentiate between unit test failures and catastrophic failures in the test runner.
         }
         finally {
             chdir($cwd);
-        }
-        if ($exit_status > 1) {
-            // mocha returns 1 if tests are failing
-            throw new CommandException('Exit status of ' . $exit_status, $command, null, '', '');
         }
     }
 
